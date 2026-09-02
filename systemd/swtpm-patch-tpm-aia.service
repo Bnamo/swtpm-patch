@@ -1,0 +1,44 @@
+[Unit]
+Description=AMD TPM CA-Issuers endpoint
+Wants=network-online.target
+After=network-online.target libvirtd.service virtnetworkd.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStartPre=/usr/bin/python3 /usr/local/libexec/swtpm-patch-tpm-aia-server.py --bind YOUR-LIBVIRT-GATEWAY --port 8080 --route /pki/aia/amd-ftpm-ca.cer --host ftpm.amd.com --certificate /var/lib/swtpm-patch-tpm-aia/pki/aia/amd-ftpm-ca.cer --check
+ExecStart=/usr/bin/python3 /usr/local/libexec/swtpm-patch-tpm-aia-server.py --bind YOUR-LIBVIRT-GATEWAY --port 8080 --route /pki/aia/amd-ftpm-ca.cer --host ftpm.amd.com --certificate /var/lib/swtpm-patch-tpm-aia/pki/aia/amd-ftpm-ca.cer
+Restart=always
+RestartSec=2s
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SocketBindDeny=any
+SocketBindAllow=ipv4:tcp:8080
+TasksMax=16
+LimitNOFILE=64
+MemoryMax=64M
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

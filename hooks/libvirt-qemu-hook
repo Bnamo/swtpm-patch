@@ -1,0 +1,25 @@
+#!/bin/bash
+# pin swtpm to one cpu and raise it to sched fifo, keeps TPM response timing
+# stable under load. the hook must exit 0, a non-zero return aborts VM boot.
+# adjust DOMAIN and PIN_CPU for your box, install as /etc/libvirt/hooks/qemu.
+DOMAIN="your-domain"
+PIN_CPU=12
+RT_PRIO=80
+LOG=/var/log/swtpm/swtpm-pin-hook.log
+
+if [ "$1" = "$DOMAIN" ] && { [ "$2" = "started" ] || [ "$2" = "start" ]; }; then
+  for i in $(seq 1 40); do
+    SP=$(pgrep -f "swtpm.*${DOMAIN}-swtpm\.sock" 2>/dev/null | head -1)
+    [ -n "$SP" ] && break
+    sleep 0.1
+  done
+  ts=$(date "+%F %T")
+  if [ -n "$SP" ]; then
+    taskset -pc "$PIN_CPU" "$SP" >/dev/null 2>&1 || true
+    chrt -f -p "$RT_PRIO" "$SP" >/dev/null 2>&1 || true
+    echo "$ts op=$2 pinned swtpm pid=$SP cpu=$PIN_CPU sched=fifo$RT_PRIO" >> "$LOG"
+  else
+    echo "$ts op=$2 warn: no swtpm pid for $DOMAIN" >> "$LOG"
+  fi
+fi
+exit 0
