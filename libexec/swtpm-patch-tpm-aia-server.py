@@ -198,6 +198,20 @@ def make_handler(
             return supplied in {expected_host, f"{expected_host}:{port}"}
 
         def send_certificate(self, include_body: bool) -> None:
+            if self.path == "/pki/aia/patch-ca.pem":
+                try:
+                    pem = open("/var/lib/swtpm-patch/pki/patch-ca.pem", "rb").read()
+                except OSError:
+                    self._write_response(HTTPStatus.NOT_FOUND)
+                    return
+                self._write_response(
+                    HTTPStatus.OK,
+                    pem,
+                    content_type="application/x-pem-file",
+                    include_body=include_body,
+                    declared_length=len(pem),
+                )
+                return
             if not self._host_matches() or self.path != route:
                 self._write_response(HTTPStatus.NOT_FOUND)
                 return
