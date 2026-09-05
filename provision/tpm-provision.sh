@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-# run directly: sudo ./provision/tpm-provision.sh [amd|intel]
-# or source it and call provision_swtpm_patch_identity <amd|intel>
 export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 
 : "${ROOT_ESC:=sudo}"
@@ -365,8 +363,6 @@ VERIFY_AIA
         _tpmp_info "AMD EK issuer endpoint active at ${aia_uri} (${aia_gateway}:${aia_port})"
     fi
 
- # 5b) microsoft mirror: detector-grade CAB with our issuer CA injected
- # the guest also needs the patch CA in LocalMachine\Root (see README notes)
     if [[ "$vendor" == amd ]]; then
         local ms_root=/var/lib/swtpm-patch-ms-mirror
         local ms_pki=/var/lib/swtpm-patch/pki
@@ -493,12 +489,11 @@ SETUPCONF
     fi
     $ROOT_ESC rm -rf "$seed_dir" 2>/dev/null || true
 
- # 8) chown tss, last on purpose, chowning before the pre-seed bricks fresh installs
+ # 8) chown tss, must be last
     $ROOT_ESC chown -R tss:tss "$ca_dir" || return 1
     $ROOT_ESC chmod -R u+rwX "$ca_dir" || return 1
 }
 
-# direct execution: sudo ./provision/tpm-provision.sh [amd|intel]
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     vendor_arg="${1:-amd}"
     provision_swtpm_patch_identity "$vendor_arg"
