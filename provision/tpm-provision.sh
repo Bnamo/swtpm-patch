@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-# source this file, then call provision_swtpm_patch_identity <amd|intel>
+# run directly: sudo ./provision/tpm-provision.sh [amd|intel]
+# or source it and call provision_swtpm_patch_identity <amd|intel>
+export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 
 : "${ROOT_ESC:=sudo}"
 _tpmp_info() { if declare -f fmtr::info  >/dev/null 2>&1; then fmtr::info  "$*"; else echo "[i] $*"; fi; }
@@ -414,7 +416,8 @@ tls|$ms_tls_cert|$ms_tls_key|serverAuth|download.microsoft.com|DNS:download.micr
             || { _tpmp_warn "forged CAB missing injected root"; return 1; }
         $ROOT_ESC rm -rf "$ms_root/verify-extract"
         $ROOT_ESC openssl x509 -in "$ca_certificate" -outform DER -out "$ms_root/issuer.der" || return 1
-        osslsigncode sign -h sha256 -certs "$ms_cs" -key "$ms_cskey" -in "$ms_root/repacked.cab" -out "$ms_root/TrustedTpm.cab" >/dev/null 2>&1 || return 1
+        rm -f "$ms_root/TrustedTpm.cab"
+        osslsigncode sign -h sha256 -certs "$ms_cs" -key "$ms_cskey" -in "$ms_root/repacked.cab" -out "$ms_root/TrustedTpm.cab" >/dev/null 2>&1 || { _tpmp_warn "CAB signing failed"; return 1; }
         osslsigncode verify -in "$ms_root/TrustedTpm.cab" -CAfile "$ms_ca" >/dev/null 2>&1 || { _tpmp_warn "forged CAB self-verify failed"; return 1; }
         $ROOT_ESC install -Dm755 "$mirror_src" "$ms_mirror_install" || return 1
         $ROOT_ESC tee "$ms_unit" >/dev/null <<MSUNIT || return 1
@@ -426,7 +429,6 @@ After=network.target
 ExecStart=/usr/bin/python3 ${ms_mirror_install} --bind ${aia_gateway} --port 443 --cab ${ms_root}/TrustedTpm.cab --cert ${ms_tls_cert} --key ${ms_tls_key}
 Restart=on-failure
 DynamicUser=yes
-AmbientCapabilities=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -495,3 +497,19 @@ SETUPCONF
     $ROOT_ESC chown -R tss:tss "$ca_dir" || return 1
     $ROOT_ESC chmod -R u+rwX "$ca_dir" || return 1
 }
+
+# direct execution: sudo ./provision/tpm-provision.sh [amd|intel]
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    vendor_arg="${1:-amd}"
+    provision_swtpm_patch_identity "$vendor_arg"
+    rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo ""
+        echo "done. guest setup (one time, in the VM):"
+        echo "  curl http://ftpm.amd.com:8080/pki/aia/patch-ca.pem -o patch-ca.pem"
+        echo "  certutil -f -addstore root patch-ca.pem"
+    else
+        echo "provisioning failed (rc=$rc)" >&2
+    fi
+    exit $rc
+fi
