@@ -12,6 +12,8 @@ checks (GetCapability properties, EK chain) then read AMD end to end.
     provision/swtpm_patch_localca_wrapper      localca wrapper (reference copy)
     libexec/swtpm-patch-reissue-ek-cert.py     EK cert re-signer
     libexec/swtpm-patch-tpm-aia-server.py      AIA http server
+    libexec/swtpm-patch-ms-mirror.py           TLS mirror serving the repacked CAB
+    provision/swtpm-patch-forge-cab.py         CAB repacker, injects the issuer CA
     libexec/swtpm-patch-verify-tpm-profile.py  verifier
     systemd/swtpm-patch-tpm-aia.service        systemd unit for the server
     hooks/libvirt-qemu-hook                    swtpm cpu pin hook (reference copy)
@@ -55,6 +57,15 @@ verify:
   ftpm.amd.com. without the DNS pin in the guest the EK chain won't resolve.
 - patch_libtpms.py patches all libtpms-family libs on purpose, swtpm links
   its bundled copy, not the system one.
+- the microsoft mirror (step 5b) needs osslsigncode on the host. it rebuilds
+  TrustedTpm.cab with the issuer CA injected, signs it with the patch CA, and
+  serves it on go.microsoft.com / download.microsoft.com via libvirt DNS pins.
+- guest step, once per VM: import the patch CA into the trusted roots:
+
+      certutil -f -addstore root patch-ca.pem
+
+  fetch it from the AIA server:
+  http://ftpm.amd.com:8080/pki/aia/patch-ca.pem
 - the libvirt hook is optional. install to /etc/libvirt/hooks/qemu, adjust
   the domain name and CPU pin for your box.
 - windows guest that stops booting after the identity change (bitlocker /
