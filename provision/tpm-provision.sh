@@ -374,7 +374,8 @@ VERIFY_AIA
         local mirror_src="${TPM_MS_MIRROR_SOURCE:-${source_dir}/../libexec/swtpm-patch-ms-mirror.py}"
         local fwlink='https://go.microsoft.com/fwlink/?linkid=2097925'
         local orig_cab ms_cab ms_ca ms_cs ms_cskey
-        command -v osslsigncode >/dev/null 2>&1 || { _tpmp_warn "osslsigncode is required for the microsoft mirror"; return 1; }
+        command -v osslsigncode >/dev/null 2>&1 || { _tpmp_warn "osslsigncode is required (build from source or AUR)"; return 1; }
+        command -v cabextract >/dev/null 2>&1 || { _tpmp_warn "cabextract is required (pacman -S cabextract)"; return 1; }
         [[ -f "$forge_src" && -f "$mirror_src" ]] || { _tpmp_warn "forge/mirror sources missing beside tpm-provision.sh"; return 1; }
         $ROOT_ESC mkdir -p "$ms_root" "$ms_pki"
         ms_ca="$ms_pki/patch-ca.pem"; ms_cs="$ms_pki/codesign.pem"; ms_cskey="$ms_pki/codesign.key"
@@ -405,7 +406,13 @@ tls|$ms_tls_cert|$ms_tls_key|serverAuth|download.microsoft.com|DNS:download.micr
             curl -sL --max-time 180 -A "Mozilla/5.0" -o "$orig_cab" "$fwlink" || return 1
         fi
         [[ -s "$orig_cab" ]] || { _tpmp_warn "TrustedTpm.cab download failed"; return 1; }
-        $ROOT_ESC python3 "$forge_src" "$orig_cab" "$ca_certificate" "$ms_root/repacked.cab" >/dev/null || return 1
+        $ROOT_ESC python3 "$forge_src" "$orig_cab" "$ca_certificate" "$ms_root/repacked.cab" || return 1
+        rm -rf "$ms_root/verify-extract"
+        $ROOT_ESC cabextract -q -d "$ms_root/verify-extract" "$ms_root/repacked.cab" 2>/dev/null \
+            || { _tpmp_warn "forged CAB failed self-test extraction"; return 1; }
+        [[ -s "$ms_root/verify-extract/AMD/RootCA/AMD-fTPM-CA.cer" ]] \
+            || { _tpmp_warn "forged CAB missing injected root"; return 1; }
+        $ROOT_ESC rm -rf "$ms_root/verify-extract"
         $ROOT_ESC openssl x509 -in "$ca_certificate" -outform DER -out "$ms_root/issuer.der" || return 1
         osslsigncode sign -h sha256 -certs "$ms_cs" -key "$ms_cskey" -in "$ms_root/repacked.cab" -out "$ms_root/TrustedTpm.cab" >/dev/null 2>&1 || return 1
         osslsigncode verify -in "$ms_root/TrustedTpm.cab" -CAfile "$ms_ca" >/dev/null 2>&1 || { _tpmp_warn "forged CAB self-verify failed"; return 1; }
