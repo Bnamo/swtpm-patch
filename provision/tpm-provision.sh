@@ -32,8 +32,8 @@ provision_swtpm_patch_identity() {
     fi
 
  local mfr_id tpm_model tpm_version ca_subject pcr_banks tpm_profile
-    local reissuer_source="${TPM_EK_REISSUER_SOURCE:-${source_dir}/swtpm-patch-reissue-ek-cert.py}"
-    local aia_server_source="${TPM_AIA_SERVER_SOURCE:-${source_dir}/swtpm-patch-tpm-aia-server.py}"
+    local reissuer_source="${TPM_EK_REISSUER_SOURCE:-${source_dir}/../libexec/swtpm-patch-reissue-ek-cert.py}"
+    local aia_server_source="${TPM_AIA_SERVER_SOURCE:-${source_dir}/../libexec/swtpm-patch-tpm-aia-server.py}"
     local reissuer_install=/usr/local/libexec/swtpm-patch-reissue-ek-cert.py
     local aia_server_install=/usr/local/libexec/swtpm-patch-tpm-aia-server.py
     local aia_host=ftpm.amd.com
@@ -373,13 +373,12 @@ VERIFY_AIA
         local forge_src="${source_dir}/swtpm-patch-forge-cab.py"
         local mirror_src="${TPM_MS_MIRROR_SOURCE:-${source_dir}/../libexec/swtpm-patch-ms-mirror.py}"
         local fwlink='https://go.microsoft.com/fwlink/?linkid=2097925'
-        local orig_cab ms_cab ms_ca ms_cs ms_cskey ms_go_cert ms_go_key ms_dl_cert ms_dl_key
+        local orig_cab ms_cab ms_ca ms_cs ms_cskey
         command -v osslsigncode >/dev/null 2>&1 || { _tpmp_warn "osslsigncode is required for the microsoft mirror"; return 1; }
         [[ -f "$forge_src" && -f "$mirror_src" ]] || { _tpmp_warn "forge/mirror sources missing beside tpm-provision.sh"; return 1; }
         $ROOT_ESC mkdir -p "$ms_root" "$ms_pki"
         ms_ca="$ms_pki/patch-ca.pem"; ms_cs="$ms_pki/codesign.pem"; ms_cskey="$ms_pki/codesign.key"
-        ms_go_cert="$ms_pki/go-microsoft-com.pem"; ms_go_key="$ms_pki/go-microsoft-com.key"
-        ms_dl_cert="$ms_pki/dl-microsoft-com.pem"; ms_dl_key="$ms_pki/dl-microsoft-com.key"
+        local ms_tls_cert="$ms_pki/ms-tls.pem" ms_tls_key="$ms_pki/ms-tls.key"
         if [[ ! -s "$ms_ca" ]]; then
             $ROOT_ESC openssl req -x509 -newkey rsa:3072 -keyout "${ms_ca%.pem}.key" -out "$ms_ca" -days 3650 -nodes \
                 -subj "/CN=Windows Update Root" \
@@ -394,8 +393,10 @@ tls|$ms_tls_cert|$ms_tls_key|serverAuth|download.microsoft.com|DNS:download.micr
                 $ROOT_ESC openssl req -newkey rsa:3072 -keyout "$key" -out "${cert%.pem}.csr" -nodes -subj "/CN=$cn" >/dev/null 2>&1 || return 1
                 local ext="basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=$eku\nsubjectKeyIdentifier=hash\n"
                 [[ -n "$san" ]] && ext="subjectAltName=$san\n$ext"
+                printf "%b" "$ext" > "${cert%.pem}.ext"
                 $ROOT_ESC openssl x509 -req -in "${cert%.pem}.csr" -CA "$ms_ca" -CAkey "${ms_ca%.pem}.key" -CAcreateserial \
-                    -out "$cert" -days 1825 -extfile <(printf "%b" "$ext") >/dev/null 2>&1 || return 1
+                    -out "$cert" -days 1825 -extfile "${cert%.pem}.ext" >/dev/null 2>&1 || return 1
+                rm -f "${cert%.pem}.ext"
                 $ROOT_ESC rm -f "${cert%.pem}.csr"
             fi
         done <<<"$ms_cert_specs"
@@ -418,6 +419,8 @@ After=network.target
 ExecStart=/usr/bin/python3 ${ms_mirror_install} --bind ${aia_gateway} --port 443 --cab ${ms_root}/TrustedTpm.cab --cert ${ms_tls_cert} --key ${ms_tls_key}
 Restart=on-failure
 DynamicUser=yes
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -441,11 +444,18 @@ MSUNIT
         $ROOT_ESC systemctl is-active swtpm-patch-ms-mirror.service >/dev/null || { _tpmp_warn "ms-mirror service failed to start"; return 1; }
         for ms_host in go.microsoft.com download.microsoft.com; do
             local ms_ips
-            ms_ips=$(_tpmp_dns_ips "$ms_host" <<<"$($ROOT_ESC virsh -c qemu:///system net-dumpxml default --inactive)") || return 1
+            persistent_xml=$($ROOT_ESC virsh -c qemu:///system net-dumpxml default --inactive) || return 1
+            ms_ips=$(_tpmp_dns_ips "$ms_host" <<<"$persistent_xml") || return 1
             if [[ -z "$ms_ips" ]]; then
-                $ROOT_ESC virsh -c qemu:///system net-update default add dns-host \
-                    "<host ip='${aia_gateway}'><hostname>${ms_host}</hostname></host>" --config || return 1
+                $ROOT_ESC virsh -c qemu:///system net-update default modify dns-host \
+                    "<host ip='${aia_gateway}'><hostname>${aia_host}</hostname><hostname>go.microsoft.com</hostname><hostname>download.microsoft.com</hostname></host>" \
+                    --config --live >/dev/null 2>&1 || true
             fi
+            persistent_xml=$($ROOT_ESC virsh -c qemu:///system net-dumpxml default --inactive) || return 1
+            [[ "$(_tpmp_dns_ips "$ms_host" <<<"$persistent_xml")" == "$aia_gateway" ]] || {
+                _tpmp_warn "persistent ${ms_host} DNS pin did not validate"
+                return 1
+            }
         done
         $ROOT_ESC install -Dm0644 "$ms_ca" /var/lib/swtpm-patch-tpm-aia/pki/aia/patch-ca.pem || return 1
         _tpmp_info "microsoft mirror active: forged CAB served at ${aia_gateway}:443"
