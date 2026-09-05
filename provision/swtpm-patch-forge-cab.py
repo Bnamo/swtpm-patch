@@ -24,7 +24,7 @@ def build_stored_cab(files, out):
         f.write(b'MSCF')
         f.write(struct.pack('<IIII', 0, total, 0, 44))   # r1, cbCabinet, r2, coffFiles
         f.write(struct.pack('<I', 0))                    # r3
-        f.write(struct.pack('<BB', 1, 3))                # ver
+        f.write(struct.pack('<BB', 3, 1))                # ver
         f.write(struct.pack('<HHH', 1, n, 0))            # cFolders, cFiles, flags
         f.write(struct.pack('<HH', 0x4d53, 0))           # setID, iCabinet
         f.write(struct.pack('<IHH', data_off, total_blocks, 0))  # CFFOLDER: coff, cCFData, type=stored
